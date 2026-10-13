@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NWA Tenant Demand Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* Layout: full-bleed map, docked side panel (desktop) / bottom sheet (phone). Plat-map neutrals with an ink-blue accent; heat and supply colors are semantic. */
+:root{
+  --bg:#f3f5f6; --panel:#ffffff; --ink:#18232b; --muted:#5b6b75; --line:#dde3e7; --soft:#eef2f4;
+  --accent:#1f4e79; --accent-ink:#ffffff;
+  --hi:#b42318; --med:#dc6803; --low:#a6800a; --avail:#15803d; --avail-soft:#dcfce7;
+  --warn:#b45309; --ok:#15803d;
+  --f-display:"Barlow Semi Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --shadow:0 6px 24px rgba(16,32,44,.14);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1519; --panel:#151d23; --ink:#e3e9ed; --muted:#93a3ad; --line:#26323a; --soft:#1c262d;
+  --accent:#6ea8dc; --accent-ink:#0b1620; --avail:#4ade80; --avail-soft:#12301d; --warn:#f59e0b; --ok:#4ade80;
+  --hi:#f0614f; --med:#f59e0b; --low:#e5c34a; --shadow:0 6px 24px rgba(0,0,0,.45); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1519; --panel:#151d23; --ink:#e3e9ed; --muted:#93a3ad; --line:#26323a; --soft:#1c262d;
+  --accent:#6ea8dc; --accent-ink:#0b1620; --avail:#4ade80; --avail-soft:#12301d; --warn:#f59e0b; --ok:#4ade80;
+  --hi:#f0614f; --med:#f59e0b; --low:#e5c34a; --shadow:0 6px 24px rgba(0,0,0,.45); color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 var(--f-body);overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+#app{display:grid;grid-template-columns:minmax(0,1fr) 380px;grid-template-rows:auto minmax(0,1fr);height:100%}
+header{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap;z-index:1000}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand h1{font:700 20px/1 var(--f-display);letter-spacing:.01em;margin:0;white-space:nowrap}
+.brand small{color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.toggles{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.tog{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;cursor:pointer;user-select:none}
+.tog[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tog .dot{width:9px;height:9px;border-radius:50%}
+.status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.status b{font-weight:600}
+.iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:5px 10px;cursor:pointer;font-weight:600;font-size:13px}
+#map{grid-row:2;grid-column:1;min-height:0;background:var(--soft)}
+aside{grid-row:2;grid-column:2;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border:0;background:none;padding:11px 6px;font:600 14px var(--f-display);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tabs .count{font-family:var(--f-body);font-weight:600;font-size:11px;background:var(--soft);border-radius:999px;padding:1px 6px;margin-left:4px}
+.pane{flex:1;overflow:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.pane[hidden]{display:none}
+h2{font:700 15px var(--f-display);letter-spacing:.05em;text-transform:uppercase;margin:4px 0 0;color:var(--muted)}
+.hint{color:var(--muted);font-size:13px;margin:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--soft);border-radius:8px;padding:7px 12px;font-weight:600;font-size:14px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--hi)}
+.btn.small{padding:4px 9px;font-size:13px}
+.btn:focus-visible,.tog:focus-visible,.tabs button:focus-visible,.item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:4px;cursor:pointer;background:var(--panel);text-align:left}
+.item:hover{border-color:var(--accent)}
+.item .top{display:flex;gap:8px;align-items:center;min-width:0}
+.item .name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.chip{font:700 11px var(--f-display);letter-spacing:.06em;text-transform:uppercase;border-radius:5px;padding:2px 6px;flex:none}
+.chip.H{background:var(--hi);color:#fff}.chip.M{background:var(--med);color:#fff}.chip.L{background:var(--low);color:#fff}
+.chip.sample{background:var(--soft);color:var(--muted);border:1px dashed var(--line)}
+.chip.tight{background:#fde7e4;color:#9b1c13}.chip.some{background:var(--avail-soft);color:var(--avail)}.chip.none{background:var(--soft);color:var(--muted)}
+.zone{border-left:5px solid var(--z,#999)}
+.zone .name{white-space:normal}
+.zone .heat{font:700 26px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.zone .grid{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px}
+.zone .grid dt{color:var(--muted)}.zone .grid dd{margin:0;font-variant-numeric:tabular-nums}
+label.f{display:grid;gap:3px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+label.f input,label.f select,label.f textarea{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:7px 9px;font-size:14px;font-weight:400;color:var(--ink);min-width:0;width:100%}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fgrid .span2{grid-column:1/-1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--bg);padding:6px 12px;font-weight:600;cursor:pointer;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.loc{border:1px solid var(--line);border-radius:8px;padding:8px;display:grid;gap:6px;background:var(--bg)}
+.loc .lrow{display:grid;grid-template-columns:1fr 84px auto;gap:6px;align-items:end}
+.legend{position:absolute;left:12px;bottom:22px;z-index:800;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:var(--shadow);font-size:12px;display:grid;gap:5px;max-width:calc(100% - 24px)}
+.legend .bar{display:flex;gap:2px}
+.legend .bar span{flex:1;height:10px;border-radius:2px;min-width:26px}
+.legend .labels{display:flex;justify-content:space-between;color:var(--muted);font-variant-numeric:tabular-nums;gap:6px}
+.legend .k{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted)}
+.legend .k i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.mapwrap{position:relative;grid-row:2;grid-column:1;min-height:0}
+.mapwrap #map{position:absolute;inset:0}
+.banner{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:850;background:var(--ink);color:var(--panel);padding:8px 14px;border-radius:999px;font-weight:600;font-size:13px;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center;max-width:calc(100% - 24px)}
+.banner button{background:none;border:1px solid currentColor;color:inherit;border-radius:999px;padding:2px 10px;cursor:pointer;font-size:12px}
+.modal-bg{position:fixed;inset:0;background:rgba(10,18,24,.5);z-index:3000;display:grid;place-items:center;padding:16px}
+.modal{background:var(--panel);border-radius:14px;box-shadow:var(--shadow);width:min(560px,100%);max-height:calc(100% - 32px);overflow:auto;padding:18px 18px 16px;display:grid;gap:12px}
+.modal h3{margin:0;font:700 20px var(--f-display)}
+.leaflet-container{font:inherit;background:var(--soft)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--ink)}
+.leaflet-popup-content{margin:12px 14px;min-width:220px}
+.pop h4{margin:0 0 2px;font:700 16px var(--f-display)}
+.pop .m{color:var(--muted);font-size:13px}
+.pop .row{margin-top:8px}
+.heat-canvas{pointer-events:none}
+.pin{width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+.pin.sel{outline:3px solid var(--accent);outline-offset:1px}
+.mapnote{font-size:12px;color:var(--muted)}
+table.map{width:100%;border-collapse:collapse;font-size:13px}
+table.map td{padding:4px 4px;border-bottom:1px solid var(--line)}
+.empty{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--muted);font-size:14px}
+.sheet-handle{display:none}
+.readonly .edit-only{display:none!important}
+@media (max-width:820px){
+  #app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr) auto}
+  .mapwrap{grid-row:2}
+  aside{grid-row:3;grid-column:1;border-left:0;border-top:1px solid var(--line);max-height:46vh;padding-bottom:env(safe-area-inset-bottom,0px)}
+  aside.collapsed .pane{display:none}
+  .sheet-handle{display:block;border:0;background:var(--soft);height:20px;cursor:pointer;color:var(--muted);font-size:12px}
+  .brand small{display:none}
+  .toggles{margin-left:0;width:100%}
+  .legend{bottom:10px;left:8px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><h1>NWA Tenant Demand Map</h1><small>Retail requirements · trade areas</small></div>
+    <div class="toggles" role="group" aria-label="Map layers">
+      <button class="tog" id="tgHeat" aria-pressed="true">Demand heat</button>
+      <button class="tog" id="tgPins" aria-pressed="true">Tenant pins</button>
+      <button class="tog" id="tgAvail" aria-pressed="false"><span class="dot" style="background:var(--avail)"></span>Current availabilities</button>
+      <button class="tog" id="tgSat" aria-pressed="false">Satellite</button>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+    <button class="iconbtn" id="btnSettings">Settings</button>
+  </header>
+  <div class="mapwrap">
+    <div id="map" aria-label="Map"></div>
+    <div class="banner" id="banner" hidden><span id="bannerText"></span><button id="bannerCancel">Cancel</button></div>
+    <div class="legend" id="legend">
+      <strong style="font:700 12px var(--f-display);letter-spacing:.06em;text-transform:uppercase">Overlapping tenants</strong>
+      <div class="bar" id="legendBar"></div>
+      <div class="labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5+</span></div>
+      <div class="k"><span><i style="background:var(--hi)"></i>High</span><span><i style="background:var(--med)"></i>Med</span><span><i style="background:var(--low)"></i>Low</span><span><i style="background:var(--avail)"></i>Available</span></div>
+    </div>
+  </div>
+  <aside id="aside">
+    <button class="sheet-handle" id="sheetHandle" aria-label="Show or hide panel">▾ panel</button>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tabZones" aria-selected="true">Hot zones<span class="count" id="cZones">0</span></button>
+      <button role="tab" id="tabTenants" aria-selected="false">Tenants<span class="count" id="cTenants">0</span></button>
+      <button role="tab" id="tabAvail" aria-selected="false">Available<span class="count" id="cAvail">0</span></button>
+    </div>
+    <section class="pane" id="paneZones"></section>
+    <section class="pane" id="paneTenants" hidden></section>
+    <section class="pane" id="paneAvail" hidden></section>
+  </aside>
+</div>
+<div id="modalRoot"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* ================= constants ================= */
+const MI = 1609.344;
+const PRI = {H:{w:1,label:"High",css:"--hi"},M:{w:.7,label:"Med",css:"--med"},L:{w:.45,label:"Low",css:"--low"}};
+const USES = ["QSR","Fast casual","Coffee / beverage","Full-service restaurant","Fitness","Medical / dental","Service / soft goods","Junior box","Other"];
+const NWA_CENTER=[36.235,-94.17], NWA_ZOOM=11;
+const NWA_VIEWBOX="-94.75,36.60,-93.70,35.90";
+const ZONE_RADIUS_MI = 1.0;      // availability counted within this distance of a hot zone
+const OVERLAP_C = 0.5;           // a tenant counts toward a hot zone when it is within its radius
+const LS = {data:"tdm.data", token:"tdm.token", pass:"tdm.pass", repo:"tdm.repo", ui:"tdm.ui"};
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}};
+const uid=()=>Math.random().toString(36).slice(2,10);
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtSF=n=>n?Math.round(n).toLocaleString()+" SF":"—";
+const fmtRange=(a,b)=>a&&b?`${(+a).toLocaleString()}–${(+b).toLocaleString()} SF`:a?`${(+a).toLocaleString()}+ SF`:b?`up to ${(+b).toLocaleString()} SF`:"SF not set";
+function distM(a,b){const R=6371008.8,t=Math.PI/180,dl=(b.lat-a.lat)*t,dg=(b.lng-a.lng)*t;const h=Math.sin(dl/2)**2+Math.cos(a.lat*t)*Math.cos(b.lat*t)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+
+/* ================= kernel + heat ramp =================
+   Each need is a soft disc: hottest at the pin, fading to zero at its radius.
+   "site" = specific address (quartic falloff); "area" = general trade area (flat core, then falloff).
+   Per tenant we take the strongest of its pins (one tenant can't stack with itself),
+   then add across tenants. The color comes from that tenant count, so one tenant alone
+   reads as a neutral footprint and heat only starts at 2 overlapping tenants. */
+const SUPPORT=1.75; // a need fades out by 1.75x its radius
+function kernel(d2,kind){ // d2 = (distance / radius)^2
+  if(d2>=SUPPORT*SUPPORT) return 0;
+  if(kind==="area"){ const d=Math.sqrt(d2); if(d<=.45) return 1; const dd=(d-.45)/.55; return Math.exp(-1.2*dd*dd); }
+  return Math.exp(-1.2*d2); }
+// how much a tenant "counts" at a spot: fully inside ~0.8x radius, half at the radius edge, gone by ~1.2x
+const countOf=k=>{ const t=Math.min(1,Math.max(0,(k-.18)/.24)); return t*t*(3-2*t); };
+const RAMP=[ // [tenant count, r,g,b, alpha]
+  [0.00, 90,110,125,0],
+  [1.00, 90,110,125,.10],
+  [1.55,250,204,90,.22],
+  [2.00,247,170,40,.42],
+  [3.00,240,104,24,.56],
+  [4.00,222,30,30,.68],
+  [5.00,170,0,45,.76],
+  [7.00,110,0,80,.84]];
+function rampAt(s){ if(s<=0)return [0,0,0,0]; for(let i=1;i<RAMP.length;i++){const a=RAMP[i-1],b=RAMP[i]; if(s<=b[0]){const t=(s-a[0])/(b[0]-a[0]);return [a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t,a[3]+(b[3]-a[3])*t,a[4]+(b[4]-a[4])*t];}} const l=RAMP[RAMP.length-1];return [l[1],l[2],l[3],l[4]]; }
+const LUT=(()=>{const n=512,o=new Float32Array(n*4);for(let i=0;i<n;i++){const v=rampAt(i/n*8);o.set(v,i*4)}return o})();
+
+/* ================= state ================= */
+let data = {version:1, updated:null, tenants:[], avail:[]};
+const ui = Object.assign({heat:true,pins:true,avail:false,sat:false,tab:"Zones",pri:{H:true,M:true,L:true}}, JSON.parse(lsGet(LS.ui)||"{}"));
+let editor=false, mode="local", repo=null, selectedTenant=null, pickHandler=null;
+
+function sampleData(){
+  const T=(name,use,pri,sfMin,sfMax,dt,locs,notes)=>({id:uid(),name,use,priority:pri,sfMin,sfMax,driveThru:dt,rent:"",notes:notes||"",sample:true,
+    locations:locs.map(([label,lat,lng,r,kind])=>({id:uid(),label,address:"",lat,lng,radiusMi:r,kind:kind||"site"}))});
+  const A=(name,lat,lng,sf,rent,type)=>({id:uid(),name,address:"",lat,lng,sf,rent,type,notes:"",sample:true,source:"sample"});
+  return {version:1,updated:new Date().toISOString(),tenants:[
+    T("Sample · Drive-thru coffee","Coffee / beverage","H",600,1200,true,[["Pinnacle Hills",36.3166,-94.1855,.5],["Bentonville – SE Walton",36.3532,-94.2003,.5],["Fayetteville – Wedington",36.0700,-94.1975,.5]]),
+    T("Sample · Better-burger QSR","QSR","H",2200,2800,true,[["Pinnacle Hills",36.3122,-94.1798,.5],["Fayetteville – Wedington",36.0705,-94.1962,.5]]),
+    T("Sample · Boutique fitness","Fitness","M",2000,3500,false,[["Rogers – Pinnacle area",36.3190,-94.1760,1.0,"area"]]),
+    T("Sample · Urgent care","Medical / dental","M",3000,4500,false,[["Pinnacle Hills",36.3102,-94.1890,.5],["Springdale – Don Tyson Pkwy",36.1545,-94.1905,.5]]),
+    T("Sample · Mattress / soft goods","Service / soft goods","L",3500,5000,false,[["Rogers – I-49 corridor",36.3290,-94.1995,.5]]),
+    T("Sample · Fast-casual bowls","Fast casual","M",2000,2600,false,[["Fayetteville – Wedington",36.0718,-94.1931,.5],["Springdale – Don Tyson Pkwy",36.1560,-94.1880,.5]]),
+    T("Sample · Pet supply","Junior box","L",8000,12000,false,[["Bentonville – SE Walton",36.3490,-94.2040,.75]]),
+    T("Sample · Nail salon","Service / soft goods","L",1200,1600,false,[["Lowell – Monroe Ave",36.2545,-94.1315,.5]])
+  ],avail:[
+    A("Sample · Pinnacle inline space",36.3140,-94.1832,1800,"$32/SF NNN","Inline"),
+    A("Sample · Rogers end-cap",36.3228,-94.1900,2400,"$30/SF NNN","End-cap"),
+    A("Sample · Wedington pad",36.0729,-94.1990,3200,"","Pad"),
+    A("Sample · Wedington inline",36.0690,-94.1905,1400,"$26/SF NNN","Inline"),
+    A("Sample · Don Tyson strip",36.1530,-94.1870,1600,"$27/SF NNN","Inline"),
+    A("Sample · Lowell inline",36.2560,-94.1340,2000,"$18/SF NNN","Inline")
+  ]};
+}
+
+/* ================= crypto (passphrase-encrypted data file) ================= */
+const b64=buf=>btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function deriveKey(pass,salt){const base=await crypto.subtle.importKey("raw",new TextEncoder().encode(pass),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:210000,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
+async function encryptJSON(obj,pass){const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const key=await deriveKey(pass,salt);const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj)));return {format:"tdm-enc-1",salt:b64(salt),iv:b64(iv),ct:b64(ct)}}
+async function decryptJSON(env,pass){const key=await deriveKey(pass,unb64(env.salt));const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(env.iv)},key,unb64(env.ct));return JSON.parse(new TextDecoder().decode(pt))}
+
+/* ================= storage: GitHub Pages repo or local browser ================= */
+function detectRepo(){
+  const saved=lsGet(LS.repo); if(saved&&/^[\w.-]+\/[\w.-]+$/.test(saved)) return saved;
+  const h=location.hostname; const m=h.match(/^([\w-]+)\.github\.io$/i);
+  if(m){const seg=location.pathname.split("/").filter(Boolean)[0]; return m[1]+"/"+(seg||(m[1]+".github.io"));}
+  return null;
+}
+const toB64Utf8=s=>{const bytes=new TextEncoder().encode(s);let bin="";for(let i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(bin)};
+async function ghGetFile(){
+  const tok=lsGet(LS.token); const r=await fetch(`https://api.github.com/repos/${repo}/contents/data.json?t=${Date.now()}`,{headers:{Authorization:`Bearer ${tok}`,Accept:"application/vnd.github+json"},cache:"no-store"});
+  if(r.status===404) return {sha:null,text:null};
+  if(!r.ok) throw new Error(`GitHub said ${r.status}. Check the token has Contents access to ${repo}.`);
+  const j=await r.json(); const bin=atob(j.content.replace(/\n/g,"")); const text=new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0)));
+  return {sha:j.sha,text};
+}
+let ghSha=null;
+async function ghPutFile(text){
+  const tok=lsGet(LS.token);
+  const body={message:`Update tenant demand data ${new Date().toISOString().slice(0,16)}`,content:toB64Utf8(text)}; if(ghSha) body.sha=ghSha;
+  let r=await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,{method:"PUT",headers:{Authorization:`Bearer ${tok}`,Accept:"application/vnd.github+json"},body:JSON.stringify(body)});
+  if(r.status===409||r.status===422){ const cur=await ghGetFile(); ghSha=cur.sha; if(ghSha)body.sha=ghSha; r=await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,{method:"PUT",headers:{Authorization:`Bearer ${tok}`,Accept:"application/vnd.github+json"},body:JSON.stringify(body)}); }
+  if(!r.ok) throw new Error(`GitHub said ${r.status} while saving.`);
+  ghSha=(await r.json()).content.sha;
+}
+
+function setStatus(html){document.getElementById("status").innerHTML=html}
+let saveTimer=null;
+function changed(){
+  data.updated=new Date().toISOString();
+  lsSet(LS.data,JSON.stringify(data));
+  renderAll();
+  if(mode==="github"&&editor){ setStatus("<b>Unsaved</b> changes…"); clearTimeout(saveTimer); saveTimer=setTimeout(saveRemote,1500); }
+  else setStatus(mode==="local"?"Saved in this browser":"View only");
+}
+async function saveRemote(){
+  const pass=lsGet(LS.pass); if(!pass){setStatus('<b style="color:var(--warn)">Not saved:</b> set a passphrase in Settings');return}
+  setStatus("Saving…");
+  try{ const env=await encryptJSON(data,pass); await ghPutFile(JSON.stringify(env)); setStatus(`Saved ${new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}`); }
+  catch(e){ setStatus(`<b style="color:var(--hi)">Not saved:</b> ${esc(e.message)}`); }
+}
+
+async function loadData(){
+  repo=detectRepo();
+  const hashKey=(location.hash.match(/key=([^&]+)/)||[])[1];
+  if(hashKey){lsSet(LS.pass,decodeURIComponent(hashKey)); history.replaceState(null,"",location.pathname+location.search);}
+  if(!repo){ mode="local"; editor=true; const s=lsGet(LS.data); data=s?JSON.parse(s):sampleData(); setStatus("Saved in this browser"); return; }
+  mode="github"; editor=!!lsGet(LS.token);
+  let text=null;
+  try{
+    if(editor){ const f=await ghGetFile(); ghSha=f.sha; text=f.text; }
+    else { const r=await fetch(`data.json?t=${Date.now()}`,{cache:"no-store"}); if(r.ok) text=await r.text(); }
+  }catch(e){ setStatus(`<b style="color:var(--hi)">Couldn't load:</b> ${esc(e.message)}`); }
+  if(!text){ data=editor?sampleData():{version:1,tenants:[],avail:[]}; setStatus(editor?"New map: first edit creates data.json":"Nothing published yet"); return; }
+  const env=JSON.parse(text);
+  if(env.format!=="tdm-enc-1"){ data=env; return; }
+  let pass=lsGet(LS.pass);
+  while(true){
+    if(pass){ try{ data=await decryptJSON(env,pass); lsSet(LS.pass,pass); setStatus(editor?"Synced with GitHub":"View only"); return; }catch(e){ lsSet(LS.pass,null); } }
+    pass=await askPassphrase(!!pass);
+  }
+}
+function askPassphrase(wrong){
+  return new Promise(res=>{
+    openModal(`<h3>Enter the map passphrase</h3><p class="hint">This map's tenant data is encrypted. ${wrong?'<b style="color:var(--hi)">That passphrase didn\'t work.</b> ':""}Ask Zac for the passphrase or a link that includes it.</p>
+    <form id="pf" class="row"><input id="pp" type="password" autocomplete="current-password" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg)" required><button class="btn primary">Open map</button></form>`,false);
+    const f=document.getElementById("pf"); document.getElementById("pp").focus();
+    f.onsubmit=e=>{e.preventDefault(); const v=document.getElementById("pp").value; closeModal(); res(v);};
+  });
+}
+
+/* ================= map ================= */
+const map=L.map("map",{doubleClickZoom:false,zoomControl:true,preferCanvas:false}).setView(NWA_CENTER,NWA_ZOOM);
+const isDark=()=>document.documentElement.dataset.theme==="dark"||(document.documentElement.dataset.theme!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);
+const streetLight=L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'});
+const streetDark=L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'});
+const sat=L.layerGroup([
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Imagery &copy; Esri, Maxar, Earthstar Geographics"}),
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",{maxZoom:19}),
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",{maxZoom:19})]);
+let base=null;
+function setBase(){ const want=ui.sat?sat:(isDark()?streetDark:streetLight); if(base===want)return; if(base)map.removeLayer(base); base=want; base.addTo(map); }
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{setBase();});
+
+map.createPane("heatPane").style.zIndex=420;
+map.createPane("ringPane").style.zIndex=430;
+map.createPane("pinPane").style.zIndex=640;
+map.createPane("availPane").style.zIndex=650;
+
+const HeatLayer=L.Layer.extend({
+  onAdd(m){ this._c=L.DomUtil.create("canvas","heat-canvas"); m.getPane("heatPane").appendChild(this._c); this._off=document.createElement("canvas");
+    m.on("moveend resize",this._reset,this); m.on("zoomstart",()=>{this._c.style.visibility="hidden"},this); this._reset(); },
+  onRemove(m){ this._c.remove(); m.off("moveend resize",this._reset,this); },
+  redraw(){ if(this._map) this._reset(); },
+  _reset(){ const m=this._map,s=m.getSize(); L.DomUtil.setPosition(this._c,m.containerPointToLayerPoint([0,0])); this._c.width=s.x; this._c.height=s.y; this._c.style.width=s.x+"px"; this._c.style.height=s.y+"px"; this._draw(); this._c.style.visibility="visible"; },
+  _draw(){
+    const m=this._map,s=m.getSize(),cell=3,gw=Math.ceil(s.x/cell),gh=Math.ceil(s.y/cell),N=gw*gh;
+    const S=new Float32Array(N),W=new Float32Array(N),K=new Float32Array(N),T=new Float32Array(N);
+    const z=m.getZoom();
+    for(const t of activeTenants()){
+      let x0=gw,y0=gh,x1=-1,y1=-1;
+      for(const l of t.locations){
+        const p=m.latLngToContainerPoint([l.lat,l.lng]); const mpp=40075016.686*Math.cos(l.lat*Math.PI/180)/Math.pow(2,z+8);
+        const rc=Math.max(1.5,(l.radiusMi||.5)*MI/mpp/cell), sc=rc*SUPPORT, cx=p.x/cell, cy=p.y/cell;
+        const ia=Math.max(0,Math.floor(cx-sc)),ib=Math.min(gw-1,Math.ceil(cx+sc)),ja=Math.max(0,Math.floor(cy-sc)),jb=Math.min(gh-1,Math.ceil(cy+sc));
+        if(ia>ib||ja>jb)continue; x0=Math.min(x0,ia);x1=Math.max(x1,ib);y0=Math.min(y0,ja);y1=Math.max(y1,jb);
+        const r2=rc*rc;
+        for(let j=ja;j<=jb;j++){const dy=j+.5-cy;for(let i=ia;i<=ib;i++){const dx=i+.5-cx;const k=kernel((dx*dx+dy*dy)/r2,l.kind);if(k>0){const ix=j*gw+i;if(k>T[ix])T[ix]=k;}}}
+      }
+      const w=PRI[t.priority]?.w||.7;
+      for(let j=y0;j<=y1;j++)for(let i=x0;i<=x1;i++){const ix=j*gw+i;const k=T[ix];if(k>0){const c=countOf(k);S[ix]+=c;W[ix]+=c*w;K[ix]+=c*k;T[ix]=0;}}
+    }
+    const off=this._off; off.width=gw; off.height=gh; const octx=off.getContext("2d"); const img=octx.createImageData(gw,gh); const d=img.data;
+    for(let ix=0;ix<N;ix++){const sv=S[ix]; if(sv<=0.001)continue; const li=Math.min(511,Math.floor(sv/8*512))*4; const pw=W[ix]/sv, pk=K[ix]/sv; // avg priority weight .45..1, avg closeness to pins 0..1
+      const boost=sv<1.4?1:(.66+.17*pw+.17*pk); d[ix*4]=LUT[li];d[ix*4+1]=LUT[li+1];d[ix*4+2]=LUT[li+2];d[ix*4+3]=Math.round(255*LUT[li+3]*boost);}
+    octx.putImageData(img,0,0);
+    const ctx=this._c.getContext("2d"); ctx.clearRect(0,0,s.x,s.y); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high"; ctx.drawImage(off,0,0,gw*cell,gh*cell);
+  }
+});
+const heat=new HeatLayer();
+const pinLayer=L.layerGroup(), ringLayer=L.layerGroup(), availLayer=L.layerGroup();
+
+function activeTenants(){ return data.tenants.filter(t=>ui.pri[t.priority]!==false && t.locations?.length); }
+
+/* ================= hot zones ================= */
+function evalPoint(pt,tenants){
+  const hits=[]; let s=0,w=0;
+  for(const t of tenants){ let best=0,bl=null; for(const l of t.locations){ const d=distM(pt,l)/((l.radiusMi||.5)*MI); const k=kernel(d*d,l.kind); if(k>best){best=k;bl=l;} }
+    const c=countOf(best); if(c>0){ s+=c; w+=c*(PRI[t.priority]?.w||.7); if(c>=OVERLAP_C) hits.push({t,l:bl,k:best}); } }
+  return {s,w,hits};
+}
+function computeZones(){
+  const ts=activeTenants(); const cands=[];
+  for(const t of ts) for(const l of t.locations){
+    let e=evalPoint(l,ts); if(e.hits.length<2) continue;
+    // pull the candidate to the centroid of each overlapping tenant's nearest pin, keep whichever scores better
+    const c={lat:e.hits.reduce((a,h)=>a+h.l.lat,0)/e.hits.length,lng:e.hits.reduce((a,h)=>a+h.l.lng,0)/e.hits.length};
+    const e2=evalPoint(c,ts); const use=(e2.hits.length>e.hits.length||(e2.hits.length===e.hits.length&&e2.w>e.w))?{p:c,e:e2}:{p:{lat:l.lat,lng:l.lng},e};
+    cands.push({lat:use.p.lat,lng:use.p.lng,...use.e,label:l.label});
+  }
+  cands.sort((a,b)=>b.hits.length-a.hits.length||b.w-a.w);
+  const zones=[];
+  for(const c of cands){ if(zones.some(z=>distM(z,c)<.6*MI)) continue; zones.push(c); }
+  for(const z of zones){
+    let sf=0,n=0; for(const a of data.avail){ if(distM(z,a)<=ZONE_RADIUS_MI*MI){sf+=+a.sf||0;n++;} }
+    z.availSF=sf; z.availN=n;
+    z.demandMin=z.hits.reduce((a,h)=>a+(+h.t.sfMin||0),0); z.demandMax=z.hits.reduce((a,h)=>a+(+h.t.sfMax||+h.t.sfMin||0),0);
+    z.supply = n===0?"none": (sf<z.demandMax? "tight":"some");
+    const labels={}; z.hits.forEach(h=>{if(h.l.label)labels[h.l.label]=(labels[h.l.label]||0)+1}); z.name=Object.keys(labels).sort((a,b)=>labels[b]-labels[a])[0]||z.label||"Unnamed area";
+  }
+  return zones;
+}
+
+/* ================= rendering ================= */
+const priColor=p=>cssVar(PRI[p]?.css||"--med");
+function renderMapLayers(){
+  pinLayer.clearLayers(); ringLayer.clearLayers(); availLayer.clearLayers();
+  for(const t of data.tenants){
+    if(ui.pri[t.priority]===false) continue;
+    for(const l of t.locations){
+      const sel=selectedTenant===t.id;
+      const mk=L.marker([l.lat,l.lng],{pane:"pinPane",draggable:editor&&sel,keyboard:true,title:`${t.name} – ${l.label||"location"}`,
+        icon:L.divIcon({className:"",html:`<div class="pin${sel?" sel":""}" style="background:${priColor(t.priority)}"></div>`,iconSize:[14,14],iconAnchor:[7,7]})});
+      mk.bindPopup(()=>tenantPopup(t,l));
+      mk.on("dragend",e=>{const p=e.target.getLatLng(); l.lat=+p.lat.toFixed(6); l.lng=+p.lng.toFixed(6); changed();});
+      pinLayer.addLayer(mk);
+      if(sel) ringLayer.addLayer(L.circle([l.lat,l.lng],{pane:"ringPane",radius:(l.radiusMi||.5)*MI,color:priColor(t.priority),weight:2,dashArray:"6 6",fill:false,interactive:false}));
+    }
+  }
+  for(const a of data.avail){
+    const r=Math.max(5,Math.min(16,4+Math.sqrt(+a.sf||0)/9));
+    const mk=L.circleMarker([a.lat,a.lng],{pane:"availPane",radius:r,color:"#0b3d1f",weight:1.5,fillColor:cssVar("--avail"),fillOpacity:.88});
+    mk.bindPopup(()=>availPopup(a)); availLayer.addLayer(mk);
+  }
+  toggleLayer(heat,ui.heat); toggleLayer(pinLayer,ui.pins); toggleLayer(ringLayer,ui.pins); toggleLayer(availLayer,ui.avail);
+  if(ui.heat) heat.redraw();
+}
+function toggleLayer(l,on){ if(on&&!map.hasLayer(l)) l.addTo(map); if(!on&&map.hasLayer(l)) map.removeLayer(l); }
+
+function tenantPopup(t,l){
+  const el=document.createElement("div"); el.className="pop";
+  el.innerHTML=`<h4>${esc(t.name)}</h4><div class="m"><span class="chip ${t.priority}">${PRI[t.priority].label}</span> ${esc(t.use||"")}${t.driveThru?" · drive-thru":""}</div>
+  <div class="m" style="margin-top:6px">${esc(l.label||"Location")} · ${l.radiusMi||.5} mi ${l.kind==="area"?"trade area":"radius"}</div>
+  <div class="m">${fmtRange(t.sfMin,t.sfMax)}${t.rent?" · "+esc(t.rent):""}</div>${t.notes?`<div class="m" style="margin-top:4px">${esc(t.notes)}</div>`:""}
+  <div class="row"><button class="btn small" data-a="open">Open tenant</button></div>`;
+  el.querySelector('[data-a="open"]').onclick=()=>{map.closePopup(); openTenant(t.id);};
+  return el;
+}
+function availPopup(a){
+  const el=document.createElement("div"); el.className="pop";
+  el.innerHTML=`<h4>${esc(a.name||a.address||"Available space")}</h4><div class="m">${a.address?esc(a.address)+"<br>":""}${fmtSF(a.sf)}${a.rent?" · "+esc(a.rent):""}${a.type?" · "+esc(a.type):""}</div>${a.notes?`<div class="m">${esc(a.notes)}</div>`:""}
+  <div class="row edit-only"><button class="btn small danger" data-a="del">Remove</button></div>`;
+  const b=el.querySelector('[data-a="del"]'); if(b) b.onclick=()=>{map.closePopup(); data.avail=data.avail.filter(x=>x!==a); changed();};
+  if(!editor) el.querySelector(".edit-only")?.remove();
+  return el;
+}
+
+function zoneColor(n){ const v=rampAt(Math.min(n,7)); return `rgb(${v[0]|0},${v[1]|0},${v[2]|0})`; }
+function renderZones(){
+  const p=document.getElementById("paneZones"); const zones=computeZones();
+  document.getElementById("cZones").textContent=zones.length;
+  const priRow=`<div class="row" role="group" aria-label="Priorities included"><span class="hint">Include:</span>${["H","M","L"].map(k=>`<button class="tog" data-pri="${k}" aria-pressed="${ui.pri[k]!==false}"><span class="dot" style="background:${priColor(k)}"></span>${PRI[k].label}</button>`).join("")}</div>`;
+  let html=`${priRow}<p class="hint">Areas where 2 or more tenants' needs overlap, ranked by how many tenants stack there, then by priority. Available space counts listings within ${ZONE_RADIUS_MI} mi.</p>`;
+  if(!zones.length) html+=`<div class="empty">No overlaps yet. A single tenant's need shows as a gray footprint; heat starts when a second tenant's area overlaps it.</div>`;
+  html+=`<div class="list">`+zones.map((z,i)=>`<button class="item zone" style="--z:${zoneColor(z.hits.length)}" data-z="${i}">
+    <div class="top"><span class="heat">${z.hits.length}</span><span class="name">${esc(z.name)}</span><span class="chip ${z.supply}" style="margin-left:auto">${z.supply==="tight"?"Tight supply":z.supply==="some"?"Has supply":"No listings"}</span></div>
+    <dl class="grid"><dt>Tenants</dt><dd>${z.hits.map(h=>`<span class="chip ${h.t.priority}" title="${PRI[h.t.priority].label}">${h.t.priority}</span> ${esc(h.t.name)}`).join("<br>")}</dd>
+    <dt>Demand</dt><dd>${z.demandMax?`${z.demandMin.toLocaleString()}–${z.demandMax.toLocaleString()} SF combined`:"SF not set"}</dd>
+    <dt>Available</dt><dd>${z.availN?`${z.availSF.toLocaleString()} SF across ${z.availN} listing${z.availN>1?"s":""}`:"None loaded nearby"}</dd></dl></button>`).join("")+`</div>`;
+  p.innerHTML=html;
+  p.querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{const z=zones[+b.dataset.z]; map.flyTo([z.lat,z.lng],15,{duration:.6}); collapseSheet();});
+  p.querySelectorAll("[data-pri]").forEach(b=>b.onclick=()=>{ui.pri[b.dataset.pri]=!(ui.pri[b.dataset.pri]!==false); saveUI(); renderAll();});
+}
+
+function renderTenants(){
+  const p=document.getElementById("paneTenants"); document.getElementById("cTenants").textContent=data.tenants.length;
+  if(selectedTenant&&data.tenants.find(t=>t.id===selectedTenant)&&editor){ renderTenantEditor(p); return; }
+  const order={H:0,M:1,L:2}; const ts=[...data.tenants].sort((a,b)=>order[a.priority]-order[b.priority]||a.name.localeCompare(b.name));
+  const hasSample=data.tenants.some(t=>t.sample)||data.avail.some(a=>a.sample);
+  let html=`<div class="row edit-only"><button class="btn primary" id="addT">Add tenant</button>${hasSample?`<button class="btn danger" id="clrS">Remove sample data</button>`:""}</div>
+  <p class="hint edit-only">Tip: double-click the map to drop a need for a tenant right there.</p>`;
+  if(!ts.length) html+=`<div class="empty">No tenants yet.${editor?" Add one, or double-click the map.":""}</div>`;
+  html+=`<div class="list">`+ts.map(t=>`<button class="item" data-t="${t.id}"><div class="top"><span class="chip ${t.priority}">${PRI[t.priority].label}</span><span class="name">${esc(t.name)}</span>${t.sample?'<span class="chip sample" style="margin-left:auto">Sample</span>':""}</div>
+    <div class="meta">${esc(t.use||"Use not set")} · ${fmtRange(t.sfMin,t.sfMax)}${t.driveThru?" · drive-thru":""}</div>
+    <div class="meta">${t.locations.length} location${t.locations.length===1?"":"s"}: ${esc(t.locations.map(l=>l.label||"pin").join(", "))}</div></button>`).join("")+`</div>`;
+  p.innerHTML=html;
+  p.querySelector("#addT")?.addEventListener("click",()=>{const t=newTenant(); openTenant(t.id);});
+  p.querySelector("#clrS")?.addEventListener("click",()=>{ if(!confirm("Remove all sample tenants and sample availabilities?"))return; data.tenants=data.tenants.filter(t=>!t.sample); data.avail=data.avail.filter(a=>!a.sample); changed(); });
+  p.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>openTenant(b.dataset.t));
+}
+function newTenant(seedLoc){ const t={id:uid(),name:"New tenant",use:"",priority:"M",sfMin:"",sfMax:"",driveThru:false,rent:"",notes:"",locations:seedLoc?[seedLoc]:[]}; data.tenants.push(t); changed(); return t; }
+function openTenant(id){
+  selectedTenant=id; setTab("Tenants"); const t=data.tenants.find(x=>x.id===id);
+  if(t&&t.locations.length){ const b=L.latLngBounds(t.locations.map(l=>[l.lat,l.lng])); map.flyToBounds(b.pad(.6),{maxZoom:14,duration:.5}); }
+  renderAll();
+}
+function renderTenantEditor(p){
+  const t=data.tenants.find(x=>x.id===selectedTenant);
+  p.innerHTML=`<div class="row"><button class="btn small" id="back">← All tenants</button>${t.sample?'<span class="chip sample">Sample</span>':""}</div>
+  <div class="fgrid">
+   <label class="f span2">Tenant<input id="t_name" value="${esc(t.name)}"></label>
+   <div class="span2" style="display:grid;gap:3px"><span style="font-size:12px;font-weight:600;color:var(--muted)">Priority</span><div class="seg" role="group">${["H","M","L"].map(k=>`<button data-p="${k}" aria-pressed="${t.priority===k}">${PRI[k].label}</button>`).join("")}</div></div>
+   <label class="f">Use type<select id="t_use"><option value="">—</option>${USES.map(u=>`<option ${t.use===u?"selected":""}>${u}</option>`).join("")}</select></label>
+   <label class="f">Drive-thru<select id="t_dt"><option value="0" ${!t.driveThru?"selected":""}>Not needed</option><option value="1" ${t.driveThru?"selected":""}>Required</option></select></label>
+   <label class="f">SF min<input id="t_sfmin" inputmode="numeric" value="${esc(t.sfMin)}"></label>
+   <label class="f">SF max<input id="t_sfmax" inputmode="numeric" value="${esc(t.sfMax)}"></label>
+   <label class="f span2">Target rent (optional)<input id="t_rent" placeholder="e.g. $28–32/SF NNN" value="${esc(t.rent)}"></label>
+   <label class="f span2">Notes<textarea id="t_notes" rows="2">${esc(t.notes)}</textarea></label>
+  </div>
+  <h2>Desired locations</h2>
+  <div class="list" id="locs">${t.locations.map(l=>`<div class="loc" data-l="${l.id}">
+     <div class="lrow"><label class="f">Area name<input data-f="label" value="${esc(l.label)}" placeholder="e.g. Pinnacle Hills"></label>
+     <label class="f">Radius (mi)<input data-f="radiusMi" inputmode="decimal" value="${l.radiusMi}"></label>
+     <button class="btn small danger" data-del="1" aria-label="Remove location">✕</button></div>
+     <div class="row"><div class="seg">${[["site","Specific site"],["area","General area"]].map(([k,lab])=>`<button data-kind="${k}" aria-pressed="${(l.kind||"site")===k}">${lab}</button>`).join("")}</div>
+     <button class="btn small" data-go="1">Show</button></div>
+     <div class="mapnote">${l.address?esc(l.address)+" · ":""}${l.lat.toFixed(5)}, ${l.lng.toFixed(5)} · drag the pin to adjust</div></div>`).join("")||'<div class="empty">No locations yet.</div>'}</div>
+  <form class="row" id="addrForm"><input id="addr" placeholder="Add by address or intersection" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--bg)"><button class="btn">Find</button></form>
+  <div id="addrResults" class="list"></div>
+  <div class="row"><button class="btn" id="pick">Pick on map</button></div>
+  <div class="row" style="margin-top:8px;justify-content:space-between"><button class="btn danger" id="delT">Delete tenant</button><button class="btn primary" id="done">Done</button></div>`;
+  const bind=(id,key,fn=v=>v)=>{const el=p.querySelector("#"+id); el.addEventListener("change",()=>{t[key]=fn(el.value); delete t.sample; changed();});};
+  bind("t_name","name",v=>v.trim()||"Unnamed tenant"); bind("t_use","use"); bind("t_dt","driveThru",v=>v==="1");
+  bind("t_sfmin","sfMin",v=>v.replace(/[^\d]/g,"")); bind("t_sfmax","sfMax",v=>v.replace(/[^\d]/g,"")); bind("t_rent","rent"); bind("t_notes","notes");
+  p.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{t.priority=b.dataset.p; changed();});
+  p.querySelectorAll(".loc").forEach(row=>{ const l=t.locations.find(x=>x.id===row.dataset.l);
+    row.querySelectorAll("[data-f]").forEach(inp=>inp.addEventListener("change",()=>{ const f=inp.dataset.f; l[f]=f==="radiusMi"?Math.max(.1,Math.min(10,parseFloat(inp.value)||.5)):inp.value; changed(); }));
+    row.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{l.kind=b.dataset.kind; if(l.kind==="area"&&l.radiusMi<1)l.radiusMi=1; changed();});
+    row.querySelector("[data-del]").onclick=()=>{t.locations=t.locations.filter(x=>x!==l); changed();};
+    row.querySelector("[data-go]").onclick=()=>{map.flyTo([l.lat,l.lng],14,{duration:.5}); collapseSheet();};
+  });
+  p.querySelector("#back").onclick=()=>{selectedTenant=null; renderAll();};
+  p.querySelector("#done").onclick=()=>{selectedTenant=null; renderAll();};
+  p.querySelector("#delT").onclick=()=>{ if(!confirm(`Delete ${t.name}?`))return; data.tenants=data.tenants.filter(x=>x!==t); selectedTenant=null; changed(); };
+  p.querySelector("#pick").onclick=()=>startPick(`Click the map to place a need for ${t.name}`,ll=>{t.locations.push({id:uid(),label:"",address:"",lat:ll.lat,lng:ll.lng,radiusMi:.5,kind:"site"}); changed(); labelFromReverse(t.locations[t.locations.length-1]);});
+  p.querySelector("#addrForm").onsubmit=async e=>{e.preventDefault(); const q=p.querySelector("#addr").value.trim(); if(!q)return; const out=p.querySelector("#addrResults"); out.innerHTML='<p class="hint">Searching…</p>';
+    try{ const rs=await geocode(q,5); if(!rs.length){out.innerHTML='<p class="hint">No match. Try adding the city, e.g. "Walton Blvd & SE 14th St, Bentonville".</p>';return;}
+      out.innerHTML=rs.map((r,i)=>`<button class="item" data-r="${i}"><div class="meta">${esc(r.display_name)}</div></button>`).join("");
+      out.querySelectorAll("[data-r]").forEach(b=>b.onclick=()=>{const r=rs[+b.dataset.r]; t.locations.push({id:uid(),label:shortPlace(r),address:r.display_name.split(",").slice(0,3).join(","),lat:+(+r.lat).toFixed(6),lng:+(+r.lon).toFixed(6),radiusMi:.5,kind:"site"}); changed(); map.flyTo([+r.lat,+r.lon],14,{duration:.5});});
+    }catch(err){ out.innerHTML=`<p class="hint">Address search isn't responding (${esc(err.message)}). Use Pick on map instead.</p>`; } };
+}
+
+function renderAvail(){
+  const p=document.getElementById("paneAvail"); document.getElementById("cAvail").textContent=data.avail.length;
+  const tot=data.avail.reduce((a,x)=>a+(+x.sf||0),0);
+  let html=`<div class="row"><button class="tog" id="avTog" aria-pressed="${ui.avail}"><span class="dot" style="background:var(--avail)"></span>${ui.avail?"Showing on map":"Hidden on map"}</button></div>
+  <p class="hint">${data.avail.length} listing${data.avail.length===1?"":"s"} · ${tot.toLocaleString()} SF total. Dot size scales with available SF.</p>
+  <div class="row edit-only"><label class="btn primary" style="display:inline-flex">Import CoStar CSV<input type="file" id="csv" accept=".csv,text/csv" hidden></label><button class="btn" id="addA">Add one</button>${data.avail.length?'<button class="btn danger" id="clrA">Clear all</button>':""}</div>
+  <p class="hint edit-only">In CoStar, export your availability search to Excel, then save it as CSV. Coordinates are used if the export has Latitude/Longitude; otherwise addresses are looked up one per second.</p>`;
+  if(!data.avail.length) html+=`<div class="empty">No availabilities loaded.</div>`;
+  html+=`<div class="list">`+[...data.avail].sort((a,b)=>(+b.sf||0)-(+a.sf||0)).map(a=>`<button class="item" data-a="${a.id}"><div class="top"><span class="name">${esc(a.name||a.address||"Available space")}</span>${a.sample?'<span class="chip sample" style="margin-left:auto">Sample</span>':""}</div><div class="meta">${fmtSF(a.sf)}${a.rent?" · "+esc(a.rent):""}${a.type?" · "+esc(a.type):""}</div></button>`).join("")+`</div>`;
+  p.innerHTML=html;
+  p.querySelector("#avTog").onclick=()=>{ui.avail=!ui.avail; saveUI(); renderAll();};
+  p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{const a=data.avail.find(x=>x.id===b.dataset.a); if(!ui.avail){ui.avail=true;saveUI();renderAll();} map.flyTo([a.lat,a.lng],15,{duration:.5}); collapseSheet();});
+  p.querySelector("#csv")?.addEventListener("change",e=>{const f=e.target.files[0]; if(f) f.text().then(importCSV); e.target.value="";});
+  p.querySelector("#addA")?.addEventListener("click",()=>startPick("Click the map where the space is",ll=>addAvailAt(ll)));
+  p.querySelector("#clrA")?.addEventListener("click",()=>{ if(!confirm("Remove every availability listing?"))return; data.avail=[]; changed(); });
+}
+
+function renderAll(){
+  document.body.classList.toggle("readonly",!editor);
+  for(const [id,k] of [["tgHeat","heat"],["tgPins","pins"],["tgAvail","avail"],["tgSat","sat"]]) document.getElementById(id).setAttribute("aria-pressed",!!ui[k]);
+  setBase(); renderMapLayers(); renderZones(); renderTenants(); renderAvail();
+}
+function saveUI(){ lsSet(LS.ui,JSON.stringify(ui)); }
+
+/* ================= tabs, sheet, banner, modal ================= */
+function setTab(name){ ui.tab=name; saveUI(); for(const n of ["Zones","Tenants","Avail"]){ document.getElementById("tab"+n).setAttribute("aria-selected",n===name); document.getElementById("pane"+n).hidden=n!==name; } document.getElementById("aside").classList.remove("collapsed"); }
+["Zones","Tenants","Avail"].forEach(n=>document.getElementById("tab"+n).onclick=()=>{ if(n!=="Tenants") selectedTenant=null; setTab(n); renderAll(); });
+document.getElementById("sheetHandle").onclick=()=>document.getElementById("aside").classList.toggle("collapsed");
+function collapseSheet(){ if(matchMedia("(max-width:820px)").matches) document.getElementById("aside").classList.add("collapsed"); }
+function startPick(text,fn){ pickHandler=fn; document.getElementById("bannerText").textContent=text; document.getElementById("banner").hidden=false; map.getContainer().style.cursor="crosshair"; collapseSheet(); }
+function endPick(){ pickHandler=null; document.getElementById("banner").hidden=true; map.getContainer().style.cursor=""; }
+document.getElementById("bannerCancel").onclick=endPick;
+function openModal(html,closable=true){ const r=document.getElementById("modalRoot"); r.innerHTML=`<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; if(closable) r.querySelector(".modal-bg").addEventListener("click",e=>{if(e.target.classList.contains("modal-bg"))closeModal();}); return r.querySelector(".modal"); }
+function closeModal(){ document.getElementById("modalRoot").innerHTML=""; }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ endPick(); closeModal(); } });
+
+/* ================= map clicks ================= */
+map.on("click",e=>{ if(pickHandler){ const fn=pickHandler; endPick(); fn(e.latlng); } });
+map.on("dblclick",e=>{ if(!editor) return; quickAdd(e.latlng); });
+function quickAdd(ll){
+  const order={H:0,M:1,L:2}; const ts=[...data.tenants].sort((a,b)=>order[a.priority]-order[b.priority]||a.name.localeCompare(b.name));
+  const el=document.createElement("div"); el.className="pop";
+  el.innerHTML=`<h4>Add here</h4><div class="m">${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}</div>
+   <label class="f" style="margin-top:8px">Tenant need<select id="qa_t"><option value="__new">+ New tenant</option>${ts.map(t=>`<option value="${t.id}" ${t.id===selectedTenant?"selected":""}>${esc(t.name)}</option>`).join("")}</select></label>
+   <label class="f" style="margin-top:6px">Radius (mi)<input id="qa_r" value="0.5" inputmode="decimal"></label>
+   <div class="row"><button class="btn small primary" id="qa_go">Add need</button><button class="btn small" id="qa_av" style="border-color:var(--avail);color:var(--avail)">Add availability</button></div>`;
+  const pop=L.popup({minWidth:240}).setLatLng(ll).setContent(el).openOn(map);
+  el.querySelector("#qa_go").onclick=()=>{ const r=Math.max(.1,Math.min(10,parseFloat(el.querySelector("#qa_r").value)||.5)); const loc={id:uid(),label:"",address:"",lat:+ll.lat.toFixed(6),lng:+ll.lng.toFixed(6),radiusMi:r,kind:r>=1?"area":"site"};
+    const v=el.querySelector("#qa_t").value; let t; if(v==="__new"){ t=newTenant(loc);} else { t=data.tenants.find(x=>x.id===v); t.locations.push(loc); }
+    map.closePopup(pop); labelFromReverse(loc); openTenant(t.id); };
+  el.querySelector("#qa_av").onclick=()=>{ map.closePopup(pop); addAvailAt(ll); };
+}
+function addAvailAt(ll){
+  const m=openModal(`<h3>Add availability</h3><div class="fgrid"><label class="f span2">Property / name<input id="a_n"></label><label class="f">Available SF<input id="a_sf" inputmode="numeric"></label><label class="f">Asking rent<input id="a_r" placeholder="$/SF NNN"></label><label class="f span2">Type<input id="a_t" placeholder="Inline, end-cap, pad…"></label></div><div class="row" style="justify-content:flex-end"><button class="btn" id="a_c">Cancel</button><button class="btn primary" id="a_s">Add</button></div>`);
+  m.querySelector("#a_n").focus(); m.querySelector("#a_c").onclick=closeModal;
+  m.querySelector("#a_s").onclick=()=>{ data.avail.push({id:uid(),name:m.querySelector("#a_n").value.trim(),address:"",lat:+ll.lat.toFixed(6),lng:+ll.lng.toFixed(6),sf:+m.querySelector("#a_sf").value.replace(/[^\d.]/g,"")||0,rent:m.querySelector("#a_r").value.trim(),type:m.querySelector("#a_t").value.trim(),notes:"",source:"manual"}); ui.avail=true; saveUI(); closeModal(); changed(); };
+}
+
+/* ================= geocoding (OpenStreetMap Nominatim) ================= */
+async function geocode(q,limit=1){
+  const u=`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&limit=${limit}&viewbox=${NWA_VIEWBOX}&q=${encodeURIComponent(q)}`;
+  const r=await fetch(u,{headers:{Accept:"application/json"}}); if(!r.ok) throw new Error("lookup service "+r.status); return r.json();
+}
+function shortPlace(r){ const a=r.address||{}; const parts=r.display_name.split(",").map(s=>s.trim()); return parts.slice(0,2).join(", "); }
+async function labelFromReverse(loc){
+  if(loc.label) return;
+  try{ const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${loc.lat}&lon=${loc.lng}`); if(!r.ok)return; const j=await r.json(); const a=j.address||{};
+    const city=a.city||a.town||a.village||a.hamlet||""; const road=a.road||a.neighbourhood||a.suburb||""; if(!loc.label){ loc.label=[city,road].filter(Boolean).join(" – ")||"Dropped pin"; changed(); } }catch(e){}
+}
+
+/* ================= CSV import ================= */
+function parseCSV(text){
+  const rows=[]; let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; }
+    else if(c==='"') q=true; else if(c===","){row.push(f);f="";} else if(c==="\n"||c==="\r"){ if(c==="\r"&&text[i+1]==="\n")i++; row.push(f); rows.push(row); row=[]; f=""; } else f+=c; }
+  if(f!==""||row.length){row.push(f);rows.push(row);}
+  return rows.filter(r=>r.some(x=>x.trim()!==""));
+}
+const GUESS={
+  name:[/^property name$/i,/building name/i,/^name$/i,/property/i],
+  address:[/^property address$/i,/^address$/i,/street/i,/address/i],
+  city:[/^city$/i,/city/i], state:[/^state$/i], zip:[/zip|postal/i],
+  lat:[/^latitude$/i,/^lat$/i,/lat/i], lng:[/^longitude$/i,/^lng$|^lon$|^long$/i,/lon/i],
+  sf:[/total available space/i,/available.*\(sf\)/i,/sf avail/i,/avail.*sf/i,/space avail/i,/available space/i,/max.*contig/i,/^sf$/i],
+  rent:[/rent/i,/asking/i], type:[/space use|secondary type|property subtype|space type|subtype/i,/type/i]};
+function guessCol(headers,key){ for(const re of GUESS[key]){ const i=headers.findIndex(h=>re.test(h)); if(i>=0) return i; } return -1; }
+function importCSV(text){
+  const rows=parseCSV(text.replace(/^﻿/,"")); if(rows.length<2){ openModal(`<h3>Nothing to import</h3><p class="hint">That file has no data rows.</p><div class="row"><button class="btn" onclick="closeModal()">Close</button></div>`); return; }
+  // CoStar exports sometimes have title rows above the header: use the first row with 4+ filled cells
+  let hi=rows.findIndex(r=>r.filter(x=>x.trim()).length>=4); if(hi<0)hi=0;
+  const headers=rows[hi].map(h=>h.trim()), body=rows.slice(hi+1);
+  const keys=[["name","Property name"],["address","Street address"],["city","City"],["state","State"],["zip","ZIP"],["lat","Latitude"],["lng","Longitude"],["sf","Available SF"],["rent","Asking rent"],["type","Space / property type"]];
+  const opts=i=>`<option value="-1">— not in file —</option>`+headers.map((h,j)=>`<option value="${j}" ${j===i?"selected":""}>${esc(h)}</option>`).join("");
+  const m=openModal(`<h3>Import ${body.length} rows</h3><p class="hint">Check that each field points at the right column.</p>
+   <div style="overflow-x:auto"><table class="map">${keys.map(([k,l])=>`<tr><td>${l}</td><td><select data-k="${k}" style="width:100%;max-width:260px;border:1px solid var(--line);border-radius:6px;padding:4px;background:var(--bg)">${opts(guessCol(headers,k))}</select></td></tr>`).join("")}</table></div>
+   <label class="row" style="font-size:14px"><input type="checkbox" id="imRep" checked> Replace current availabilities (keeps a clean snapshot)</label>
+   <div id="imProg" class="hint"></div><div class="row" style="justify-content:flex-end"><button class="btn" id="imC">Cancel</button><button class="btn primary" id="imGo">Import</button></div>`);
+  let cancel=false; m.querySelector("#imC").onclick=()=>{cancel=true; closeModal();};
+  m.querySelector("#imGo").onclick=async()=>{
+    const col={}; m.querySelectorAll("[data-k]").forEach(s=>col[s.dataset.k]=+s.value);
+    const get=(r,k)=>col[k]>=0?(r[col[k]]||"").trim():"";
+    const num=v=>{const n=parseFloat(String(v).replace(/[^\d.\-]/g,""));return isNaN(n)?0:n;};
+    const out=[], prog=m.querySelector("#imProg"); m.querySelector("#imGo").disabled=true; let missed=0;
+    for(let i=0;i<body.length&&!cancel;i++){
+      const r=body[i]; const addr=[get(r,"address"),get(r,"city"),get(r,"state"),get(r,"zip")].filter(Boolean).join(", ");
+      let lat=num(get(r,"lat")), lng=num(get(r,"lng"));
+      if(!(lat&&lng)&&addr){ prog.textContent=`Looking up address ${i+1} of ${body.length}…`; try{ const g=await geocode(addr,1); if(g[0]){lat=+g[0].lat;lng=+g[0].lon;} }catch(e){} await new Promise(s=>setTimeout(s,1100)); }
+      if(!(lat&&lng)){ missed++; continue; }
+      out.push({id:uid(),name:get(r,"name"),address:addr,lat:+lat.toFixed(6),lng:+lng.toFixed(6),sf:num(get(r,"sf")),rent:get(r,"rent"),type:get(r,"type"),notes:"",source:"costar"});
+    }
+    if(cancel) return;
+    if(m.querySelector("#imRep").checked) data.avail=data.avail.filter(a=>a.source==="manual"); data.avail.push(...out);
+    ui.avail=true; saveUI(); closeModal(); changed(); setTab("Avail");
+    if(missed) openModal(`<h3>Imported ${out.length} listings</h3><p class="hint">${missed} row${missed>1?"s":""} had no coordinates and no address that could be found, so they were skipped.</p><div class="row"><button class="btn" onclick="closeModal()">OK</button></div>`);
+  };
+}
+
+/* ================= settings ================= */
+document.getElementById("btnSettings").onclick=()=>{
+  const isGH=mode==="github"; const pass=lsGet(LS.pass)||"";
+  const m=openModal(`<h3>Settings</h3>
+   ${isGH?`<p class="hint">Data saves to <b>data.json</b> in <b>${esc(repo)}</b>, encrypted with your passphrase. Only a browser holding your GitHub token can save.</p>`:`<p class="hint">Running outside GitHub Pages, so data saves in this browser only. Use Export to back up or move it.</p>`}
+   <div class="fgrid">
+    ${isGH?`<label class="f span2">Repository (owner/name)<input id="s_repo" value="${esc(repo)}"></label>
+    <label class="f span2">GitHub token (editor only, stays in this browser)<input id="s_tok" type="password" value="${esc(lsGet(LS.token)||"")}" placeholder="github_pat_…"></label>`:""}
+    <label class="f span2">Data passphrase${isGH?"":" (only needed on GitHub)"}<input id="s_pass" type="password" value="${esc(pass)}" autocomplete="new-password"></label>
+   </div>
+   <div class="row"><button class="btn primary" id="s_save">Save settings</button><button class="btn" id="s_close">Close</button></div>
+   ${isGH&&pass?`<h2>Share</h2><p class="hint">Viewers can look but never save. The first link opens straight to the map; the second asks them for the passphrase.</p>
+   <div class="row"><button class="btn" id="s_l1">Copy link with passphrase</button><button class="btn" id="s_l2">Copy plain link</button></div><input id="s_lnk" readonly style="width:100%;border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--bg);font-size:12px" hidden>`:""}
+   <h2>Backup</h2><div class="row"><button class="btn" id="s_exp">Export JSON</button><label class="btn edit-only">Import JSON<input type="file" id="s_imp" accept=".json,application/json" hidden></label></div>
+   <h2>Appearance</h2><div class="seg">${["system","light","dark"].map(k=>`<button data-th="${k}" aria-pressed="${(document.documentElement.dataset.theme||"system")===k}">${k[0].toUpperCase()+k.slice(1)}</button>`).join("")}</div>`);
+  if(!editor) m.querySelectorAll(".edit-only").forEach(x=>x.remove());
+  m.querySelector("#s_close").onclick=closeModal;
+  m.querySelector("#s_save").onclick=async()=>{
+    const newPass=m.querySelector("#s_pass").value; const passChanged=newPass!==pass; lsSet(LS.pass,newPass||null);
+    if(isGH){ const r=m.querySelector("#s_repo").value.trim(); lsSet(LS.repo,r&&r!==detectRepoDefault()?r:null); lsSet(LS.token,m.querySelector("#s_tok").value.trim()||null); }
+    closeModal();
+    if(isGH){ const wasEditor=editor; repo=detectRepo(); editor=!!lsGet(LS.token);
+      if(editor&&!wasEditor){ try{ const f=await ghGetFile(); ghSha=f.sha; if(f.text){ const env=JSON.parse(f.text); if(env.format==="tdm-enc-1"&&newPass) data=await decryptJSON(env,newPass); } else if(!data.tenants.length){ data=sampleData(); } }catch(e){ setStatus(`<b style="color:var(--hi)">Couldn't sign in:</b> ${esc(e.message)}`); } }
+      if(editor&&(passChanged||!ghSha)) await saveRemote(); }
+    renderAll();
+  };
+  const share=withKey=>{ const u=location.origin+location.pathname+(withKey?"#key="+encodeURIComponent(lsGet(LS.pass)):""); const box=m.querySelector("#s_lnk"); box.hidden=false; box.value=u; box.select();
+    navigator.clipboard?.writeText(u).then(()=>setStatus("Link copied"),()=>{}); };
+  m.querySelector("#s_l1")?.addEventListener("click",()=>share(true)); m.querySelector("#s_l2")?.addEventListener("click",()=>share(false));
+  m.querySelector("#s_exp").onclick=()=>{ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`tenant-demand-${new Date().toISOString().slice(0,10)}.json`; a.click(); };
+  m.querySelector("#s_imp")?.addEventListener("change",async e=>{ const f=e.target.files[0]; if(!f)return; try{ const j=JSON.parse(await f.text()); if(!Array.isArray(j.tenants))throw new Error("not a map export"); data=j; closeModal(); changed(); }catch(err){ alert("That file isn't a tenant map export."); } });
+  m.querySelectorAll("[data-th]").forEach(b=>b.onclick=()=>{ const v=b.dataset.th; if(v==="system") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme=v; lsSet("tdm.theme",v); m.querySelectorAll("[data-th]").forEach(x=>x.setAttribute("aria-pressed",x===b)); renderAll(); });
+};
+function detectRepoDefault(){ const h=location.hostname.match(/^([\w-]+)\.github\.io$/i); if(!h)return null; const seg=location.pathname.split("/").filter(Boolean)[0]; return h[1]+"/"+(seg||(h[1]+".github.io")); }
+
+/* ================= header toggles ================= */
+for(const [id,k] of [["tgHeat","heat"],["tgPins","pins"],["tgAvail","avail"],["tgSat","sat"]])
+  document.getElementById(id).onclick=()=>{ ui[k]=!ui[k]; saveUI(); renderAll(); };
+
+/* ================= boot ================= */
+(function(){ const th=lsGet("tdm.theme"); if(th==="light"||th==="dark") document.documentElement.dataset.theme=th; })();
+document.getElementById("legendBar").innerHTML=[1,2,3,4,5].map(n=>{const v=rampAt(n);return `<span style="background:rgba(${v[0]|0},${v[1]|0},${v[2]|0},${Math.min(1,v[3]+.2)})"></span>`}).join("");
+setBase();
+loadData().then(()=>{ setTab(ui.tab||"Zones"); renderAll(); });
+</script>
+</body>
+</html>
